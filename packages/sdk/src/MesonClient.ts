@@ -19,7 +19,9 @@ import { SwapWithSigner } from './SwapWithSigner'
 import { SwapSigner, clipRecipient } from './SwapSigner'
 import { SignedSwapRequestData, SignedSwapReleaseData } from './SignedSwap'
 import * as adaptors from './adaptors'
+import { IAdaptor } from './adaptors/types'
 import AptosAdaptor from './adaptors/aptos/AptosAdaptor'
+import BtcAdaptor from './adaptors/bitcoin/BtcAdaptor'
 import SuiAdaptor from './adaptors/sui/SuiAdaptor'
 import SolanaAdaptor from './adaptors/solana/SolanaAdaptor'
 import StarkAdaptor from './adaptors/starknet/StarkAdaptor'
@@ -161,6 +163,8 @@ export class MesonClient {
       this.addressFormat = 'ethers'
     } else if (mesonInstance.provider instanceof AptosAdaptor) {
       this.addressFormat = 'aptos'
+    } else if (mesonInstance.provider instanceof BtcAdaptor) {
+      this.addressFormat = 'bitcoin'
     } else if (mesonInstance.provider instanceof SuiAdaptor) {
       this.addressFormat = 'sui'
     } else if (mesonInstance.provider instanceof SolanaAdaptor) {
@@ -198,6 +202,9 @@ export class MesonClient {
   }
 
   formatAddress(addr: string): string {
+    if (addr === AddressOne) {
+      return addr
+    }
     return adaptors.formatAddress(this.addressFormat, addr)
   }
 
@@ -206,17 +213,11 @@ export class MesonClient {
   }
 
   get provider() {
-    return this.#mesonInstance.provider as providers.JsonRpcProvider
+    return this.#mesonInstance.provider as unknown as IAdaptor
   }
 
   get nodeUrl(): string {
-    if (this.provider['nodeUrl']) {
-      return this.provider['nodeUrl']
-    } else if (this.provider instanceof providers.WebSocketProvider) {
-      return this.provider._websocket?._url
-    } else {
-      return this.provider.connection?.url
-    }
+    return this.provider.nodeUrl
   }
 
   async detectNetwork() {
@@ -264,6 +265,7 @@ export class MesonClient {
   get coreDecimals() {
     switch (this.addressFormat) {
       case 'aptos':
+      case 'bitcoin':
       case 'ckb':
         return 8
       case 'sui':
@@ -295,7 +297,7 @@ export class MesonClient {
   }
 
   async fetchLatestEvents(blockRange = 100): Promise<providers.Log[]> {
-    const toBlock = await this.#mesonInstance.provider.getBlockNumber()
+    const toBlock = await this.provider.getBlockNumber()
     const fromBlock = toBlock - blockRange
     return await this.fetchEventsBetween(fromBlock, toBlock)
   }
@@ -318,7 +320,7 @@ export class MesonClient {
       toBlock,
       topics,
     }
-    return await this.#mesonInstance.provider.getLogs?.(filter)
+    return await this.provider.getLogs?.(filter)
   }
 
   /// General read methods
@@ -656,7 +658,7 @@ export class MesonClient {
     const overrides: CallOverrides = {}
     if (typeof block === 'number') {
       if (block <= 0) {
-        const blockNumber = await this.#mesonInstance.provider.getBlockNumber()
+        const blockNumber = await this.provider.getBlockNumber()
         overrides.blockTag = blockNumber + block
       } else {
         overrides.blockTag = block
@@ -692,7 +694,7 @@ export class MesonClient {
     const overrides: CallOverrides = {}
     if (typeof block === 'number') {
       if (block <= 0) {
-        const blockNumber = await this.#mesonInstance.provider.getBlockNumber()
+        const blockNumber = await this.provider.getBlockNumber()
         overrides.blockTag = blockNumber + block
       } else {
         overrides.blockTag = block

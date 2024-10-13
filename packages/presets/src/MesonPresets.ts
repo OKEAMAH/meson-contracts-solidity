@@ -1,8 +1,10 @@
 import { providers } from 'ethers'
-import { SuiClient } from '@mysten/sui.js/client'
+import { AptosClient } from 'aptos'
 import { Connection as SolConnection } from '@solana/web3.js'
 import { RpcProvider as StarkProvider } from 'starknet'
+import { SuiClient } from '@mysten/sui.js/client'
 import TronWeb from 'tronweb'
+import { Provider as ZkProvider } from 'zksync-web3'
 
 import {
   MesonClient,
@@ -10,16 +12,23 @@ import {
   PostedSwapStatus,
   LockedSwapStatus,
   adaptors,
+  IAdaptor,
 } from '@mesonfi/sdk'
+import BtcClient from '@mesonfi/sdk/lib/adaptors/bitcoin/BtcClient'
+
+import EthersAdaptor from '@mesonfi/sdk/lib/adaptors/ethers/EthersAdaptor'
+import ZksyncAdaptor from '@mesonfi/sdk/lib/adaptors/zksync/ZksyncAdaptor'
+import AptosAdaptor from '@mesonfi/sdk/lib/adaptors/aptos/AptosAdaptor'
+import BtcAdaptor from '@mesonfi/sdk/lib/adaptors/bitcoin/BtcAdaptor'
+import CkbAdaptor from '@mesonfi/sdk/lib/adaptors/ckb/CkbAdaptor'
+import SolanaAdaptor from '@mesonfi/sdk/lib/adaptors/solana/SolanaAdaptor'
+import StarkAdaptor from '@mesonfi/sdk/lib/adaptors/starknet/StarkAdaptor'
+import SuiAdaptor from '@mesonfi/sdk/lib/adaptors/sui/SuiAdaptor'
+import TronAdaptor from '@mesonfi/sdk/lib/adaptors/tron/TronAdaptor'
+
 import { Meson } from '@mesonfi/contract-abis'
 
-import {
-  AptosFallbackClient,
-  RpcFallbackProvider,
-  FailsafeStaticJsonRpcProvider,
-  FailsafeWebSocketProvider,
-  ExtendedCkbClient,
-} from './providers'
+import { ExtendedCkbClient } from './providers'
 
 import testnets from './testnets.json'
 import mainnets from './mainnets.json'
@@ -180,73 +189,68 @@ export class MesonPresets {
     return { swap, from, to }
   }
 
-  createMesonClient(id: string, client: any): MesonClient {
+  createMesonClient(id: string, adaptor: IAdaptor): MesonClient {
     const network = this.getNetwork(id)
     if (!network) {
       throw new Error(`Unsupported network: ${id}`)
     }
     this.disposeMesonClient(id)
-    const instance = adaptors.getContract(network.mesonAddress, Meson.abi, client)
+    const instance = adaptors.getContract(network.mesonAddress, Meson.abi, adaptor)
     const mesonClient = new MesonClient(instance, network.shortSlip44)
     this._cache.set(id, mesonClient)
     return mesonClient
   }
 
-  _getProviderClassAndConstructParams(id: string, urls: string[] = [], opts?) {
+  _getProviderClassAndConstructParams(id: string, url: string, opts?) {
     const network = this.getNetwork(id)
     if (!network) {
       throw new Error(`Unsupported network: ${id}`)
     }
 
-    const url = urls[0]
-
     if (id.startsWith('aptos')) {
-      return [AptosFallbackClient, [urls]]
-    } else if (id.startsWith('sui')) {
-      return [SuiClient, [{ url }]]
-    } else if (id.startsWith('solana')) {
-      return [SolConnection, [url, 'confirmed']]
-    } else if (id.startsWith('starknet')) {
-      return [StarkProvider, [{ nodeUrl: url }]]
+      return [AptosClient, [url], AptosAdaptor]
+    } else if (network.id.startsWith('bitcoin')) {
+      return [BtcClient, [url, id === 'bitcoin-signet', network.mesonAddress], BtcAdaptor]
     } else if (id.startsWith('ckb')) {
-      return [ExtendedCkbClient, [url, undefined, { ...network.metadata, tokens: network.tokens }]]
+      return [ExtendedCkbClient, [url, undefined, { ...network.metadata, tokens: network.tokens }], CkbAdaptor]
+    } else if (id.startsWith('solana')) {
+      return [SolConnection, [url, 'confirmed'], SolanaAdaptor]
+    } else if (id.startsWith('starknet')) {
+      return [StarkProvider, [{ nodeUrl: url }], StarkAdaptor]
+    } else if (id.startsWith('sui')) {
+      return [SuiClient, [{ url }], SuiAdaptor]
     } else if (id.startsWith('tron')) {
-      return [TronWeb, [{ fullHost: url }]]
+      return [TronWeb, [{ fullHost: url }], TronAdaptor]
     }
 
     const providerNetwork = { name: network.name, chainId: Number(network.chainId) }
-    if (urls.length >= 2) {
-      const fallbacks = urls.map(url => {
-        let provider
-        if (url.startsWith('ws')) {
-          if (opts?.WebSocket) {
-            const ws = new opts.WebSocket(url)
-            provider = new FailsafeWebSocketProvider(ws, providerNetwork)
-          } else {
-            provider = new FailsafeWebSocketProvider(url, providerNetwork)
-          }
-        } else {
-          provider = new FailsafeStaticJsonRpcProvider(url, providerNetwork)
-        }
-        return { provider, priority: 1, stallTimeout: 1000, weight: 1 }
-      })
-      return [RpcFallbackProvider, [fallbacks, opts?.threshold || (urls.length > 2 ? 2 : 1)]]
-    }
-    
     if (url.startsWith('ws')) {
-      if (WebSocket) {
-        return [providers.WebSocketProvider, [new WebSocket(url), providerNetwork]]
+      if (opts?.WebSocket) {
+        return [providers.WebSocketProvider, [new opts.WebSocket(url), providerNetwork], EthersAdaptor]
       } else {
-        return [providers.WebSocketProvider, [url, providerNetwork]]
+        return [providers.WebSocketProvider, [url, providerNetwork], EthersAdaptor]
       }
+    } else if (id.startsWith('zksync') || id.startsWith('zklink')) {
+      return [ZkProvider, [url, providerNetwork], ZksyncAdaptor]
     } else {
-      return [providers.StaticJsonRpcProvider, [url, providerNetwork]]
+      return [providers.StaticJsonRpcProvider, [url, providerNetwork], EthersAdaptor]
     }
   }
 
+  // deprecated
   createNetworkClient(id: string, urls: string[] = [], opts?): providers.Provider {
-    const [ProviderClass, constructParams] = this._getProviderClassAndConstructParams(id, urls, opts)
+    const url = [...urls].sort(() => Math.sign(Math.random() - 0.5))[0]
+    const [ProviderClass, constructParams] = this._getProviderClassAndConstructParams(id, url, opts)
     return new ProviderClass(...constructParams)
+  }
+
+  createAdaptor(id: string, url: string, opts?): IAdaptor {
+    const [ProviderClass, constructParams, AdaptorClass] = this._getProviderClassAndConstructParams(id, url, opts)
+    return new AdaptorClass(new ProviderClass(...constructParams))
+  }
+
+  createFailoverAdaptor(id: string, urls: string[] = [], opts?) {
+    return adaptors.getFailoverAdaptor(urls.map(url => this.createAdaptor(id, url, opts)))
   }
 
   disposeMesonClient(id: string) {

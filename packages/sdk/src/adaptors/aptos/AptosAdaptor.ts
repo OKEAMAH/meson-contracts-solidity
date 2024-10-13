@@ -1,11 +1,21 @@
 import { BigNumber, utils } from 'ethers'
 import { AptosClient, HexString } from 'aptos'
 
-export default class AptosAdaptor {
-  readonly client: AptosClient
+import { IAdaptor } from '../types'
+
+export default class AptosAdaptor implements IAdaptor {
+  #client: AptosClient | any
 
   constructor(client: AptosClient) {
-    this.client = client
+    this.#client = client
+  }
+
+  get client() {
+    return this.#client
+  }
+
+  protected set client(c) {
+    this.#client = c
   }
 
   get nodeUrl() {
@@ -21,8 +31,11 @@ export default class AptosAdaptor {
     return Number(info.block_height)
   }
 
-  async getTransactionCount() {
+  async getGasPrice() {
+    return BigNumber.from(0)
+  }
 
+  async getTransactionCount(addr: string) {
   }
 
   async getBalance(addr) {
@@ -31,6 +44,9 @@ export default class AptosAdaptor {
       const result = await this.client.getAccountResource(new HexString(addr), type)
       return BigNumber.from((result.data as any).coin.value)
     } catch (e) {
+      if (e.errors) {
+        e = e.errors[0]
+      }
       if (e.errorCode === 'resource_not_found') {
         return BigNumber.from(0)
       }
@@ -38,9 +54,12 @@ export default class AptosAdaptor {
     }
   }
 
-  async getCode(addr) {
+  async getCode(addr: string): Promise<string> {
     // TODO
-    return
+    return ''
+  }
+
+  async getLogs(filter) {
   }
 
   on () {}
